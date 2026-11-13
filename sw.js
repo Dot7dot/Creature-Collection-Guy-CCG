@@ -1,6 +1,6 @@
 // 簡單的離線快取：優先使用網路，失敗時改用快取
-const CACHE = 'nature-journal-v1';
-const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'nature-journal-v2';
+const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'places.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

@@ -57,13 +57,22 @@ function formatTime(iso) {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function formatLoc(loc) {
-  if (!loc) return '未記錄';
+function formatCoords(loc) {
   return `${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}`;
 }
 
+/** 有附近地點就只顯示地點名稱，否則顯示經緯度 */
+function formatLoc(loc) {
+  if (!loc) return '未記錄';
+  return loc.place ? loc.place.name : formatCoords(loc);
+}
+
 function mapUrl(loc) {
-  return `https://www.openstreetmap.org/?mlat=${loc.lat}&mlon=${loc.lng}#map=16/${loc.lat}/${loc.lng}`;
+  const base = 'https://www.google.com/maps/search/?api=1';
+  if (loc.place && loc.place.source === 'google') {
+    return `${base}&query=${encodeURIComponent(loc.place.name)}&query_place_id=${encodeURIComponent(loc.place.id)}`;
+  }
+  return `${base}&query=${loc.lat},${loc.lng}`;
 }
 
 function uid() {
@@ -111,6 +120,7 @@ const state = {
   capturedAt: null,
   location: null,
   locating: false,
+  placePending: null,
 };
 
 async function startCamera() {
@@ -189,6 +199,9 @@ function resetCapture() {
   state.blob = null;
   state.capturedAt = null;
   state.location = null;
+  state.locating = false;
+  state.placePending = null;
+  locToken++;
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = null;
   preview.removeAttribute('src');
@@ -234,16 +247,38 @@ $('#retakeBtn').addEventListener('click', () => {
   startCamera();
 });
 
-/* ================= GPS 定位 ================= */
+/* ================= GPS 定位 + 附近地點 ================= */
+let locToken = 0; // 重新定位時用來丟棄舊的結果
+
 function renderLoc() {
   const el = $('#locText');
-  if (state.locating && !state.location) el.textContent = '定位中…';
-  else if (state.location) {
-    el.textContent = `${formatLoc(state.location)}（±${Math.round(state.location.accuracy)}m）`;
-  } else el.textContent = '無法取得位置';
+  const loc = state.location;
+  if (state.locating && !loc) el.textContent = '定位中…';
+  else if (!loc) el.textContent = '無法取得位置';
+  else if (state.placePending) el.textContent = '搜尋附近地點…';
+  else if (loc.place) el.textContent = loc.place.name;
+  else el.textContent = `${formatCoords(loc)}（±${Math.round(loc.accuracy)}m）`;
+}
+
+/** 找方圓 100 公尺內最明顯的地點；找不到或查詢失敗就保留經緯度 */
+function lookupPlace(token) {
+  const loc = state.location;
+  state.placePending = Places.nearby(loc.lat, loc.lng)
+    .then((place) => {
+      if (token === locToken && place) loc.place = place;
+    })
+    .catch((err) => console.warn('附近地點查詢失敗，改用經緯度', err))
+    .finally(() => {
+      if (token !== locToken) return;
+      state.placePending = null;
+      renderLoc();
+    });
+  renderLoc();
 }
 
 function locate() {
+  const token = ++locToken;
+  state.placePending = null;
   if (!('geolocation' in navigator)) {
     state.locating = false;
     renderLoc();
@@ -253,15 +288,18 @@ function locate() {
   renderLoc();
   navigator.geolocation.getCurrentPosition(
     (pos) => {
+      if (token !== locToken) return;
       state.locating = false;
       state.location = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy,
+        place: null,
       };
-      renderLoc();
+      lookupPlace(token);
     },
     (err) => {
+      if (token !== locToken) return;
       state.locating = false;
       console.warn(err);
       renderLoc();
@@ -287,6 +325,14 @@ $('#recordForm').addEventListener('submit', async (e) => {
     return;
   }
   const category = new FormData(e.target).get('category');
+  const btn = $('#saveBtn');
+  btn.disabled = true;
+  // 附近地點還在查詢中就稍等一下（最多 8 秒），逾時則以經緯度儲存
+  if (state.placePending) {
+    btn.textContent = '取得地點中…';
+    await Promise.race([state.placePending, new Promise((r) => setTimeout(r, 8000))]);
+    btn.textContent = '儲存到相簿';
+  }
   const record = {
     id: uid(),
     category,
@@ -296,8 +342,6 @@ $('#recordForm').addEventListener('submit', async (e) => {
     location: state.location,
     photo: state.blob,
   };
-  const btn = $('#saveBtn');
-  btn.disabled = true;
   try {
     await db.add(record);
     toast(`已儲存到「${CATEGORIES[category]}」相簿`);
@@ -384,7 +428,8 @@ async function openDetail(id) {
     a.href = mapUrl(r.location);
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = `${formatLoc(r.location)}（在地圖上查看）`;
+    a.textContent = formatLoc(r.location);
+    a.title = '在 Google 地圖上查看';
     loc.append(a);
   } else {
     loc.textContent = '未記錄';
