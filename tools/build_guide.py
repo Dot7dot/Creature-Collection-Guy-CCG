@@ -343,24 +343,50 @@ def classify(iconic, anc):
 
 
 # ---------------------------------------------------------------- 4. 維基百科
-def wiki_extract(f, titles, genus):
-    for title in titles:
-        if not title:
+def _trim(text):
+    text = re.sub(r'\s*\n+\s*', '\n', text.strip())
+    if len(text) > 420:
+        cut = max(text.rfind('。', 0, 420), text.rfind('；', 0, 420))
+        text = text[:cut + 1] if cut > 80 else text[:420] + '…'
+    return text
+
+
+def wiki_batch(f, titles):
+    """一次查詢多個條目（每批 20 個），回傳 {原始標題: {'text','url','title'}}"""
+    found = {}
+    titles = list(dict.fromkeys(t for t in titles if t))
+    for i in range(0, len(titles), 20):
+        chunk = titles[i:i + 20]
+        try:
+            res = f.json(WIKI + '?' + qs({
+                'action': 'query', 'prop': 'extracts', 'exintro': 1, 'explaintext': 1, 'exlimit': 20,
+                'redirects': 1, 'format': 'json', 'variant': 'zh-tw', 'titles': '|'.join(chunk),
+            }), delay=2.0)
+        except Exception as e:  # noqa: BLE001
+            print(f'   ! 維基百科批次查詢失敗：{e}')
             continue
-        res = f.json(WIKI + '?' + qs({
-            'action': 'query', 'prop': 'extracts|info', 'inprop': 'url', 'exintro': 1, 'explaintext': 1,
-            'redirects': 1, 'format': 'json', 'variant': 'zh-tw', 'titles': title,
-        }), delay=1.0)
-        for p in (res.get('query', {}).get('pages') or {}).values():
-            text = (p.get('extract') or '').strip()
-            if not text or genus not in text:  # 確認是同一個物種／屬的條目
-                continue
-            text = re.sub(r'\s*\n+\s*', '\n', text)
-            if len(text) > 420:
-                cut = max(text.rfind('。', 0, 420), text.rfind('；', 0, 420))
-                text = text[:cut + 1] if cut > 80 else text[:420] + '…'
-            return {'text': text, 'url': 'https://zh.wikipedia.org/zh-tw/' + urllib.parse.quote(p['title'].replace(' ', '_'))}
-    return None
+        q = res.get('query', {})
+        alias = {}
+        for key in ('normalized', 'converted', 'redirects'):
+            for m in q.get(key) or []:
+                alias[m['from']] = m['to']
+        pages = {p['title']: p for p in (q.get('pages') or {}).values()}
+
+        def resolve(t):
+            seen = set()
+            while t in alias and t not in seen:
+                seen.add(t)
+                t = alias[t]
+            return t
+
+        for t in chunk:
+            p = pages.get(resolve(t))
+            if p and p.get('extract'):
+                found[t] = {
+                    'text': _trim(p['extract']),
+                    'url': 'https://zh.wikipedia.org/zh-tw/' + urllib.parse.quote(p['title'].replace(' ', '_')),
+                }
+    return found
 
 
 # ---------------------------------------------------------------- 照片
@@ -441,7 +467,7 @@ def main():
     months = inat_month_counts(f)
 
     # ---- 組合
-    print('3. TaiCOL + 4. 維基百科 + 照片')
+    print('3. TaiCOL + 照片')
     out = []
     for i, (key, s) in enumerate(species.items()):
         t = taxa.get(s['inat_id']) if s['inat_id'] else None
@@ -510,21 +536,13 @@ def main():
                     'license': tcred.get('授權方式', '').replace('CC by by-nc', 'CC BY-NC'),
                 }
 
-        # 維基百科
-        genus = sci.split()[0] if sci else '\0'
+        # 維基百科：先記下候選標題，稍後批次查詢
         titles = []
         if t and t.get('wikipedia_url') and 'zh.wikipedia' in t['wikipedia_url']:
             titles.append(urllib.parse.unquote(t['wikipedia_url'].rsplit('/', 1)[-1]))
         titles += [zh, sci]
         if not (oc and oc.get('description')):
-            try:
-                w = wiki_extract(f, list(dict.fromkeys(titles)), genus)
-            except Exception as e:  # noqa: BLE001
-                print(f'   ! 維基百科查詢失敗 {zh}: {e}')
-                w = None
-            if w:
-                entry['wiki'] = w
-                entry['credits']['wiki'] = {'source': '維基百科', 'license': 'CC BY-SA 4.0', 'url': w['url']}
+            entry['_wiki_titles'] = list(dict.fromkeys(titles))
 
         # 照片：官方照片優先，其次 iNaturalist CC 授權照片
         try:
@@ -554,6 +572,19 @@ def main():
         out.append(entry)
         if (i + 1) % 50 == 0:
             print(f'   {i + 1}/{len(species)}')
+
+    print('4. 維基百科物種簡介（批次查詢）')
+    wanted = [t for e in out for t in e.get('_wiki_titles', [])]
+    wiki = wiki_batch(f, wanted)
+    for e in out:
+        genus = e['sci'].split()[0] if e['sci'] else '\0'
+        for t in e.pop('_wiki_titles', []):
+            w = wiki.get(t)
+            if w and genus in w['text']:  # 確認是同一個物種／屬的條目
+                e['wiki'] = w
+                e['credits']['wiki'] = {'source': '維基百科', 'license': 'CC BY-SA 4.0', 'url': w['url']}
+                break
+    print(f'   有維基百科簡介：{sum(1 for e in out if "wiki" in e)} 種')
 
     order = {'animal': 0, 'insect': 1, 'plant': 2}
     out.sort(key=lambda e: (order[e['category']], not e['featured'], -e['obs'], e['zh']))
