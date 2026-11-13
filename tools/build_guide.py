@@ -90,7 +90,8 @@ class Fetcher:
                 if attempt == 3:
                     raise
                 print(f'  retry {url[:90]} ({e})', file=sys.stderr)
-                time.sleep(3 * (attempt + 1))
+                slow = getattr(e, 'code', None) == 429
+                time.sleep((20 if slow else 3) * (attempt + 1))
         self.last[host] = time.time()
         with open(p, 'wb') as f:
             f.write(data)
@@ -349,7 +350,7 @@ def wiki_extract(f, titles, genus):
         res = f.json(WIKI + '?' + qs({
             'action': 'query', 'prop': 'extracts|info', 'inprop': 'url', 'exintro': 1, 'explaintext': 1,
             'redirects': 1, 'format': 'json', 'variant': 'zh-tw', 'titles': title,
-        }), delay=0.3)
+        }), delay=1.0)
         for p in (res.get('query', {}).get('pages') or {}).values():
             text = (p.get('extract') or '').strip()
             if not text or genus not in text:  # 確認是同一個物種／屬的條目
@@ -516,7 +517,11 @@ def main():
             titles.append(urllib.parse.unquote(t['wikipedia_url'].rsplit('/', 1)[-1]))
         titles += [zh, sci]
         if not (oc and oc.get('description')):
-            w = wiki_extract(f, list(dict.fromkeys(titles)), genus)
+            try:
+                w = wiki_extract(f, list(dict.fromkeys(titles)), genus)
+            except Exception as e:  # noqa: BLE001
+                print(f'   ! 維基百科查詢失敗 {zh}: {e}')
+                w = None
             if w:
                 entry['wiki'] = w
                 entry['credits']['wiki'] = {'source': '維基百科', 'license': 'CC BY-SA 4.0', 'url': w['url']}
