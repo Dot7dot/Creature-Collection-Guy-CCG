@@ -125,17 +125,51 @@
       </button>
       <img id="detailImg" alt="">
       <div class="detail-body">
-        <span id="detailCat" class="chip"></span>
-        <h2 id="detailName"></h2>
-        <dl>
-          <dt>時間</dt><dd id="detailTime"></dd>
-          <dt>地點</dt><dd id="detailLoc"></dd>
-          <dt>備註</dt><dd id="detailNote"></dd>
-        </dl>
-        <div class="form-actions">
-          <a id="detailDownload" class="btn btn-ghost" download>下載照片</a>
-          <button id="detailDelete" class="btn btn-danger" type="button">刪除</button>
+        <div id="detailView">
+          <span id="detailCat" class="chip"></span>
+          <h2 id="detailName"></h2>
+          <dl>
+            <dt>時間</dt><dd id="detailTime"></dd>
+            <dt>地點</dt><dd id="detailLoc"></dd>
+            <dt>備註</dt><dd id="detailNote"></dd>
+          </dl>
+          <div class="form-actions">
+            <button id="detailEdit" class="btn btn-primary" type="button">編輯</button>
+            <a id="detailDownload" class="btn btn-ghost" download>下載</a>
+            <button id="detailDelete" class="btn btn-danger" type="button">刪除</button>
+          </div>
         </div>
+
+        <form id="editForm" class="edit-form" hidden>
+          <div class="field">
+            <span class="label">拍攝類別</span>
+            <div class="segmented" role="radiogroup" aria-label="拍攝類別">
+              <label><input type="radio" name="editCategory" value="animal"><span>動物</span></label>
+              <label><input type="radio" name="editCategory" value="plant"><span>植物</span></label>
+              <label><input type="radio" name="editCategory" value="landscape"><span>風景</span></label>
+            </div>
+          </div>
+          <label class="field">
+            <span class="label">照片名稱</span>
+            <input id="editName" type="text" maxlength="60" required>
+          </label>
+          <div class="field">
+            <div class="label-row">
+              <label class="label" for="editLoc">地點名稱</label>
+              <button id="editLocSearch" class="link-btn small" type="button">自動搜尋附近地點</button>
+            </div>
+            <input id="editLoc" type="text" maxlength="80">
+            <span id="editLocHint" class="hint"></span>
+          </div>
+          <label class="field">
+            <span class="label">備註</span>
+            <textarea id="editNote" rows="3" maxlength="1000"></textarea>
+          </label>
+          <div class="form-actions">
+            <button id="editCancel" class="btn btn-ghost" type="button">取消</button>
+            <button id="editSave" class="btn btn-primary" type="submit">儲存變更</button>
+          </div>
+        </form>
       </div>
     </div>
   </dialog>

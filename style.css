@@ -284,3 +284,10 @@ input[type="text"]:focus, textarea:focus { border-color: var(--primary); }
 @media (min-width: 520px) {
   .grid { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* ===== 編輯 ===== */
+.edit-form { display: grid; gap: 14px; }
+.edit-form[hidden], #detailView[hidden] { display: none; }
+.label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.hint { font-size: .78rem; color: var(--muted); }
+.pending { color: var(--muted); }

@@ -6,7 +6,8 @@ const THEMES = {
   coffee: { label: '咖啡橘', color: '#4A2E21' },
   green: { label: '森林綠', color: '#1F4D36' },
 };
-const PHOTO_SIZE = 1080; // 儲存的正方形照片邊長（px）
+const PHOTO_SIZE = 1080;          // 儲存的正方形照片邊長（px）
+const LOCATION_REUSE_MS = 120000; // 兩分鐘內重拍沿用同一次定位
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -30,8 +31,8 @@ const db = {
     const d = await this.open();
     return new Promise((resolve, reject) => {
       const t = d.transaction('records', mode);
-      const result = fn(t.objectStore('records'));
-      t.oncomplete = () => resolve(result && 'result' in result ? result.result : undefined);
+      const out = fn(t.objectStore('records'));
+      t.oncomplete = () => resolve(out ? out.result : undefined);
       t.onerror = () => reject(t.error);
       t.onabort = () => reject(t.error);
     });
@@ -40,6 +41,18 @@ const db = {
   remove(id) { return this.tx('readwrite', (s) => s.delete(id)); },
   get(id) { return this.tx('readonly', (s) => s.get(id)); },
   all() { return this.tx('readonly', (s) => s.getAll()); },
+  /** 在同一個交易中讀出 → 修改 → 寫回；fn 回傳 false 代表不修改。回傳更新後的記錄或 null */
+  update(id, fn) {
+    return this.tx('readwrite', (s) => {
+      const out = { result: null };
+      const req = s.get(id);
+      req.onsuccess = () => {
+        const r = req.result;
+        if (r && fn(r) !== false) { s.put(r); out.result = r; }
+      };
+      return out;
+    });
+  },
 };
 
 /* ================= 工具 ================= */
@@ -57,14 +70,19 @@ function formatTime(iso) {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+function hasCoords(loc) {
+  return Boolean(loc) && typeof loc.lat === 'number' && typeof loc.lng === 'number';
+}
+
 function formatCoords(loc) {
   return `${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}`;
 }
 
-/** 有附近地點就只顯示地點名稱，否則顯示經緯度 */
+/** 有地點名稱就只顯示名稱，否則顯示經緯度 */
 function formatLoc(loc) {
   if (!loc) return '未記錄';
-  return loc.place ? loc.place.name : formatCoords(loc);
+  if (loc.place) return loc.place.name;
+  return hasCoords(loc) ? formatCoords(loc) : '未記錄';
 }
 
 function mapUrl(loc) {
@@ -72,7 +90,8 @@ function mapUrl(loc) {
   if (loc.place && loc.place.source === 'google') {
     return `${base}&query=${encodeURIComponent(loc.place.name)}&query_place_id=${encodeURIComponent(loc.place.id)}`;
   }
-  return `${base}&query=${loc.lat},${loc.lng}`;
+  if (hasCoords(loc)) return `${base}&query=${loc.lat},${loc.lng}`;
+  return `${base}&query=${encodeURIComponent(loc.place.name)}`;
 }
 
 function uid() {
@@ -94,6 +113,10 @@ $('#themeBtn').addEventListener('click', () => {
 });
 
 /* ================= 頁面切換 ================= */
+function currentView() {
+  return $('.view.active').id.replace('view-', '');
+}
+
 function showView(name) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
@@ -118,9 +141,13 @@ const state = {
   blob: null,
   previewUrl: null,
   capturedAt: null,
-  location: null,
-  locating: false,
-  placePending: null,
+  // 定位工作：GPS → 附近地點，全部在背景進行
+  location: null,   // 目前已知的位置（UI 顯示用）
+  locating: false,  // GPS 定位中
+  searching: false, // 附近地點搜尋中
+  job: null,        // Promise<location|null>，完成時含地點名稱
+  jobDone: false,
+  jobStartedAt: 0,
 };
 
 async function startCamera() {
@@ -139,12 +166,12 @@ async function startCamera() {
     toast(err.name === 'NotAllowedError' ? '相機權限被拒絕，請在瀏覽器設定中允許' : '無法開啟相機');
     return;
   }
+  ensureLocation(); // 相機開啟後就在背景開始定位，不影響拍照
   video.srcObject = state.stream;
   await video.play().catch(() => {});
   frame.classList.add('live');
   frame.classList.toggle('mirror', state.facing === 'user');
   $('#shutterRow').hidden = false;
-  locate(); // 提前開始定位，拍照時就有位置
 }
 
 function stopCamera() {
@@ -190,18 +217,15 @@ function setCaptured(blob) {
   frame.classList.add('shot');
   $('#timeText').textContent = formatTime(state.capturedAt);
   $('#recordForm').hidden = false;
+  ensureLocation();
   renderLoc();
-  if (!state.location && !state.locating) locate();
   setTimeout(() => $('#recordForm').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 }
 
+/** 清掉這次拍攝的照片與表單；定位結果保留，兩分鐘內重拍可直接沿用 */
 function resetCapture() {
   state.blob = null;
   state.capturedAt = null;
-  state.location = null;
-  state.locating = false;
-  state.placePending = null;
-  locToken++;
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = null;
   preview.removeAttribute('src');
@@ -209,7 +233,6 @@ function resetCapture() {
   frame.classList.remove('shot');
   $('#recordForm').hidden = true;
   $('#recordForm').reset();
-  $('#locText').textContent = '尚未取得';
   $('#timeText').textContent = '—';
 }
 
@@ -247,72 +270,144 @@ $('#retakeBtn').addEventListener('click', () => {
   startCamera();
 });
 
-/* ================= GPS 定位 + 附近地點 ================= */
-let locToken = 0; // 重新定位時用來丟棄舊的結果
+/* ================= GPS 定位 + 附近地點（背景） ================= */
+let locToken = 0; // 重新定位時用來忽略舊工作對畫面的更新
 
 function renderLoc() {
   const el = $('#locText');
   const loc = state.location;
-  if (state.locating && !loc) el.textContent = '定位中…';
+  if (state.locating) el.textContent = '定位中…';
   else if (!loc) el.textContent = '無法取得位置';
-  else if (state.placePending) el.textContent = '搜尋附近地點…';
   else if (loc.place) el.textContent = loc.place.name;
+  else if (state.searching) el.textContent = '搜尋附近地點中（可直接儲存）';
   else el.textContent = `${formatCoords(loc)}（±${Math.round(loc.accuracy)}m）`;
 }
 
-/** 找方圓 100 公尺內最明顯的地點；找不到或查詢失敗就保留經緯度 */
-function lookupPlace(token) {
-  const loc = state.location;
-  state.placePending = Places.nearby(loc.lat, loc.lng)
-    .then((place) => {
-      if (token === locToken && place) loc.place = place;
-    })
-    .catch((err) => console.warn('附近地點查詢失敗，改用經緯度', err))
-    .finally(() => {
-      if (token !== locToken) return;
-      state.placePending = null;
-      renderLoc();
-    });
-  renderLoc();
-}
-
-function locate() {
-  const token = ++locToken;
-  state.placePending = null;
-  if (!('geolocation' in navigator)) {
-    state.locating = false;
-    renderLoc();
-    return;
-  }
-  state.locating = true;
-  renderLoc();
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      if (token !== locToken) return;
-      state.locating = false;
-      state.location = {
+function getPosition() {
+  return new Promise((resolve) => {
+    if (!('geolocation' in navigator)) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy,
         place: null,
-      };
-      lookupPlace(token);
-    },
-    (err) => {
-      if (token !== locToken) return;
-      state.locating = false;
-      console.warn(err);
-      renderLoc();
-      if (err.code === err.PERMISSION_DENIED) toast('定位權限被拒絕，照片將不記錄地點');
-    },
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
-  );
+        placeStatus: 'pending',
+      }),
+      (err) => {
+        console.warn(err);
+        if (err.code === err.PERMISSION_DENIED) toast('定位權限被拒絕，照片將不記錄地點');
+        resolve(null);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    );
+  });
 }
 
-$('#locBtn').addEventListener('click', () => {
+/** 搜尋附近地點並寫入 loc：找到 → 名稱；100m 內沒有 → 經緯度；查詢失敗 → 之後重試 */
+async function resolvePlace(loc) {
+  try {
+    loc.place = await Places.nearby(loc.lat, loc.lng);
+    loc.placeStatus = 'done';
+  } catch (err) {
+    console.warn('附近地點查詢失敗，稍後重試', err);
+    loc.placeStatus = 'retry';
+  }
+  return loc;
+}
+
+/** 開始一個新的定位工作（GPS → 附近地點），完全不阻擋拍照與儲存 */
+function locate() {
+  const token = ++locToken;
+  const mine = () => token === locToken;
   state.location = null;
-  locate();
-});
+  state.locating = true;
+  state.searching = false;
+  state.jobDone = false;
+  state.jobStartedAt = Date.now();
+  state.job = (async () => {
+    const loc = await getPosition();
+    if (mine()) {
+      state.locating = false;
+      state.location = loc;
+      state.searching = Boolean(loc);
+      renderLoc();
+    }
+    if (loc) await resolvePlace(loc);
+    if (mine()) {
+      state.searching = false;
+      state.jobDone = true;
+      renderLoc();
+    }
+    return loc;
+  })();
+  renderLoc();
+}
+
+/** 沒有定位工作或已過時才重新定位 */
+function ensureLocation() {
+  if (!state.job || Date.now() - state.jobStartedAt > LOCATION_REUSE_MS) locate();
+}
+
+$('#locBtn').addEventListener('click', locate);
+
+/* ---------- 已儲存記錄的背景補完 ---------- */
+const bgActive = new Set();
+
+/** 等定位工作完成後，把結果寫回已儲存的記錄（使用者若已手動編輯地點則不覆蓋） */
+async function finishInBackground(id, job) {
+  bgActive.add(id);
+  try {
+    const loc = await job;
+    const updated = await db.update(id, (r) => {
+      if (!r.locPending) return false;
+      r.locPending = false;
+      r.location = loc ? { ...loc } : null;
+    });
+    if (updated) onRecordChanged(updated);
+  } finally {
+    bgActive.delete(id);
+  }
+  // 查詢失敗的話交給重試流程
+  retryPending();
+}
+
+/** 重試尚未完成的地點搜尋（App 重新開啟、恢復網路時） */
+let retrying = false;
+async function retryPending() {
+  if (retrying || !navigator.onLine) return;
+  retrying = true;
+  try {
+    const records = await db.all();
+    for (const r of records) {
+      if (bgActive.has(r.id)) continue;
+      const loc = r.location;
+      const needsPlace = hasCoords(loc) && (loc.placeStatus === 'retry' || (r.locPending && loc.placeStatus === 'pending'));
+      if (!needsPlace && !r.locPending) continue;
+      if (!needsPlace) {
+        // App 在 GPS 定位完成前被關閉，無法補回位置
+        const updated = await db.update(r.id, (x) => { if (!x.locPending) return false; x.locPending = false; });
+        if (updated) onRecordChanged(updated);
+        continue;
+      }
+      const fresh = await resolvePlace({ ...loc });
+      if (fresh.placeStatus === 'retry') break; // 仍然失敗，等下次
+      const updated = await db.update(r.id, (x) => {
+        const cur = x.location;
+        if (!cur || cur.placeStatus === 'done' || cur.placeStatus === 'manual') return false;
+        x.location = fresh;
+        x.locPending = false;
+      });
+      if (updated) onRecordChanged(updated);
+    }
+  } catch (err) {
+    console.warn(err);
+  } finally {
+    retrying = false;
+  }
+}
+
+window.addEventListener('online', retryPending);
 
 /* ================= 儲存 ================= */
 $('#recordForm').addEventListener('submit', async (e) => {
@@ -325,25 +420,24 @@ $('#recordForm').addEventListener('submit', async (e) => {
     return;
   }
   const category = new FormData(e.target).get('category');
-  const btn = $('#saveBtn');
-  btn.disabled = true;
-  // 附近地點還在查詢中就稍等一下（最多 8 秒），逾時則以經緯度儲存
-  if (state.placePending) {
-    btn.textContent = '取得地點中…';
-    await Promise.race([state.placePending, new Promise((r) => setTimeout(r, 8000))]);
-    btn.textContent = '儲存到相簿';
-  }
+  // 不等待定位／地點搜尋：先用目前已知的位置儲存，結果出來後在背景更新
+  const pending = Boolean(state.job) && !state.jobDone;
   const record = {
     id: uid(),
     category,
     name,
     note: $('#noteInput').value.trim(),
     createdAt: state.capturedAt,
-    location: state.location,
+    location: state.location ? { ...state.location } : null,
+    locPending: pending,
     photo: state.blob,
   };
+  const btn = $('#saveBtn');
+  btn.disabled = true;
   try {
     await db.add(record);
+    if (pending) finishInBackground(record.id, state.job);
+    else if (record.location && record.location.placeStatus === 'retry') retryPending();
     toast(`已儲存到「${CATEGORIES[category]}」相簿`);
     resetCapture();
     currentCat = category;
@@ -402,19 +496,27 @@ $$('.tab').forEach((t) => t.addEventListener('click', () => {
   renderAlbum();
 }));
 
+/** 記錄被背景更新或編輯後，刷新畫面 */
+function onRecordChanged(record) {
+  if (currentView() === 'album') renderAlbum();
+  if (detail.open && detailRecord && detailRecord.id === record.id) {
+    detailRecord = record;
+    if ($('#editForm').hidden) renderDetail();
+    else renderEditLocHint();
+  }
+}
+
 /* ================= 照片詳情 ================= */
 const detail = $('#detail');
-let detailId = null;
+let detailRecord = null;
 let detailUrl = null;
 
-async function openDetail(id) {
-  const r = await db.get(id);
-  if (!r) return;
-  detailId = id;
-  if (detailUrl) URL.revokeObjectURL(detailUrl);
-  detailUrl = URL.createObjectURL(r.photo);
+function isSearching(r) {
+  return r.locPending || (r.location && (r.location.placeStatus === 'pending' || r.location.placeStatus === 'retry') && !r.location.place);
+}
 
-  $('#detailImg').src = detailUrl;
+function renderDetail() {
+  const r = detailRecord;
   $('#detailImg').alt = r.name;
   $('#detailCat').textContent = CATEGORIES[r.category];
   $('#detailName').textContent = r.name;
@@ -423,22 +525,38 @@ async function openDetail(id) {
 
   const loc = $('#detailLoc');
   loc.textContent = '';
-  if (r.location) {
+  if (r.location && (r.location.place || hasCoords(r.location))) {
     const a = document.createElement('a');
     a.href = mapUrl(r.location);
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = formatLoc(r.location);
     a.title = '在 Google 地圖上查看';
+    a.textContent = formatLoc(r.location);
     loc.append(a);
+    if (isSearching(r)) {
+      const s = document.createElement('span');
+      s.className = 'pending';
+      s.textContent = r.location.placeStatus === 'retry' ? '（連上網路後會自動搜尋地點）' : '（搜尋附近地點中…）';
+      loc.append(' ', s);
+    }
   } else {
-    loc.textContent = '未記錄';
+    loc.textContent = r.locPending ? '定位中…' : '未記錄';
   }
 
   const dl = $('#detailDownload');
   dl.href = detailUrl;
   dl.download = `${r.name}-${r.createdAt.slice(0, 10)}.jpg`;
+}
 
+async function openDetail(id) {
+  const r = await db.get(id);
+  if (!r) return;
+  detailRecord = r;
+  if (detailUrl) URL.revokeObjectURL(detailUrl);
+  detailUrl = URL.createObjectURL(r.photo);
+  $('#detailImg').src = detailUrl;
+  showEdit(false);
+  renderDetail();
   detail.showModal();
 }
 
@@ -451,15 +569,120 @@ detail.addEventListener('click', (e) => { if (e.target === detail) closeDetail()
 detail.addEventListener('close', () => {
   if (detailUrl) URL.revokeObjectURL(detailUrl);
   detailUrl = null;
-  detailId = null;
+  detailRecord = null;
 });
 
 $('#detailDelete').addEventListener('click', async () => {
-  if (!detailId) return;
+  if (!detailRecord) return;
   if (!confirm('確定要刪除這張照片嗎？')) return;
-  await db.remove(detailId);
+  await db.remove(detailRecord.id);
   closeDetail();
   toast('已刪除');
+  renderAlbum();
+});
+
+/* ================= 編輯 ================= */
+const editForm = $('#editForm');
+let editLocOriginal = '';
+let editLocFound = null; // 「自動搜尋」找到的地點（保留來源與 id）
+
+function showEdit(on) {
+  $('#detailView').hidden = on;
+  editForm.hidden = !on;
+}
+
+function renderEditLocHint() {
+  const r = detailRecord;
+  const input = $('#editLoc');
+  const hint = $('#editLocHint');
+  const coords = hasCoords(r.location);
+  input.placeholder = coords ? formatCoords(r.location) : '輸入地點名稱';
+  if (isSearching(r) && input.value === editLocOriginal && !editLocOriginal) {
+    hint.textContent = '正在背景搜尋附近地點，也可以直接輸入';
+  } else {
+    hint.textContent = coords ? '留空則顯示經緯度' : '這張照片沒有 GPS 記錄，留空則不記錄地點';
+  }
+  $('#editLocSearch').hidden = !coords;
+}
+
+$('#detailEdit').addEventListener('click', () => {
+  const r = detailRecord;
+  if (!r) return;
+  editForm.querySelector(`input[name="editCategory"][value="${r.category}"]`).checked = true;
+  $('#editName').value = r.name;
+  $('#editNote').value = r.note || '';
+  editLocOriginal = (r.location && r.location.place && r.location.place.name) || '';
+  editLocFound = null;
+  $('#editLoc').value = editLocOriginal;
+  renderEditLocHint();
+  showEdit(true);
+  $('#editName').focus();
+});
+
+$('#editCancel').addEventListener('click', () => {
+  showEdit(false);
+  renderDetail();
+});
+
+$('#editLocSearch').addEventListener('click', async () => {
+  const r = detailRecord;
+  if (!r || !hasCoords(r.location)) return;
+  const btn = $('#editLocSearch');
+  btn.disabled = true;
+  btn.textContent = '搜尋中…';
+  try {
+    const place = await Places.nearby(r.location.lat, r.location.lng);
+    if (place) {
+      editLocFound = place;
+      $('#editLoc').value = place.name;
+    } else {
+      toast(`方圓 ${Places.radius} 公尺內沒有找到地點`);
+    }
+  } catch (err) {
+    console.warn(err);
+    toast('搜尋失敗，請檢查網路連線');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '自動搜尋附近地點';
+  }
+});
+
+editForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const r = detailRecord;
+  if (!r) return;
+  const name = $('#editName').value.trim();
+  if (!name) {
+    toast('請輸入照片名稱');
+    $('#editName').focus();
+    return;
+  }
+  const category = new FormData(editForm).get('editCategory');
+  const note = $('#editNote').value.trim();
+  const locName = $('#editLoc').value.trim();
+  const locChanged = locName !== editLocOriginal;
+
+  const updated = await db.update(r.id, (x) => {
+    x.name = name;
+    x.category = category;
+    x.note = note;
+    if (!locChanged) return; // 地點沒動：保留（包括背景搜尋剛寫入的結果）
+    x.locPending = false;
+    const base = x.location || { lat: null, lng: null, accuracy: null };
+    if (!locName) {
+      x.location = hasCoords(base) ? { ...base, place: null, placeStatus: 'manual' } : null;
+    } else if (editLocFound && editLocFound.name === locName) {
+      x.location = { ...base, place: editLocFound, placeStatus: 'done' };
+    } else {
+      x.location = { ...base, place: { name: locName, source: 'manual' }, placeStatus: 'manual' };
+    }
+  });
+  if (!updated) return;
+  detailRecord = updated;
+  showEdit(false);
+  renderDetail();
+  toast('已更新');
+  if (category !== currentCat) currentCat = category;
   renderAlbum();
 });
 
@@ -477,4 +700,7 @@ $('#detailDelete').addEventListener('click', async () => {
   }
   // 要求瀏覽器盡量保留資料，避免照片被自動清除
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+  // 補完上次未完成的地點搜尋
+  retryPending();
 })();
