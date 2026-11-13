@@ -119,7 +119,11 @@ const Guide = (() => {
     const m = sp.months || [];
     const total = m.reduce((a, b) => a + b, 0);
     if (!total) {
-      return '<p class="month-note">iNaturalist 上還沒有這個物種在太平山的研究級觀察紀錄。</p>';
+      const sensitive = sp.status.some((s) => s.includes('保育') || s.includes('IUCN') || s.includes('國家'));
+      return sensitive
+        ? '<p class="month-note">這是保育類或受威脅物種。為了保護牠們，公開的觀察資料會把位置模糊化，' +
+          '所以不會出現在太平山的月份統計中，並不代表這裡看不到。</p>'
+        : '<p class="month-note">iNaturalist 上還沒有這個物種在太平山的研究級觀察紀錄。</p>';
     }
     const max = Math.max(...m);
     const summary = m.map((n, i) => `${i + 1}月 ${n} 筆`).join('、');
@@ -177,7 +181,7 @@ const Guide = (() => {
           ${off.distribution ? `<dt>分布</dt><dd>${esc(off.distribution)}</dd>` : ''}
           ${off.spots ? `<dt>觀賞地點</dt><dd>${esc(off.spots)}</dd>` : ''}
           ${off.trails.length ? `<dt>步道</dt><dd>${esc(off.trails.join('、'))}</dd>` : ''}
-          ${off.seasons.length ? `<dt>季節</dt><dd><div class="season-row">${seasons}</div></dd>` : ''}
+          ${off.seasons.length ? `<dt>建議季節</dt><dd><div class="season-row">${seasons}</div></dd>` : ''}
         </dl>
       </div>`;
     }

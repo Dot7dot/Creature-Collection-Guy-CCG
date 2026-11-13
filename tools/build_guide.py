@@ -221,6 +221,9 @@ def taicol_info(t):
     red = {'NCR': '國家極危', 'NEN': '國家瀕危', 'NVU': '國家易危', 'NNT': None, 'NLC': None}
     if red.get(t.get('redlist')):
         status.append(red[t['redlist']])
+    iucn = {'CR': 'IUCN 極危', 'EN': 'IUCN 瀕危', 'VU': 'IUCN 易危'}.get(t.get('iucn'))
+    if iucn:
+        status.append(iucn)
     return {
         'ranks': {r.lower(): {'name': h['simple_name']} for r, h in higher.items()},
         'kingdom': (higher.get('Kingdom') or {}).get('simple_name'),
@@ -361,7 +364,7 @@ def wiki_batch(f, titles):
             res = f.json(WIKI + '?' + qs({
                 'action': 'query', 'prop': 'extracts', 'exintro': 1, 'explaintext': 1, 'exlimit': 20,
                 'redirects': 1, 'format': 'json', 'variant': 'zh-tw', 'titles': '|'.join(chunk),
-            }), delay=2.0)
+            }), delay=5.0)
         except Exception as e:  # noqa: BLE001
             print(f'   ! 維基百科批次查詢失敗：{e}')
             continue
@@ -390,6 +393,14 @@ def wiki_batch(f, titles):
 
 
 # ---------------------------------------------------------------- 照片
+def license_label(raw):
+    raw = (raw or '').strip()
+    m = re.match(r'(?i)cc\s*(?:by\s*)?(by[-a-z]*)\s*([\d.]*)', raw)
+    if not m:
+        return raw
+    return ('CC ' + m.group(1).upper() + (' ' + m.group(2) if m.group(2) else '')).strip()
+
+
 def save_image(f, url, name):
     path = os.path.join(IMG_DIR, name)
     if not os.path.exists(path):
@@ -452,6 +463,11 @@ def main():
     for key, e in off_by_key.items():
         sci = e['taicol'].get('sci')
         t = inat_find(f, sci) if sci else None
+        if t and t['id'] not in counts and len(sci.replace(' var. ', ' ').split()) > 2:
+            # 官方列的是亞種／變種，但觀察紀錄記在種的層級：改用種
+            parent = inat_find(f, ' '.join(sci.split()[:2]))
+            if parent and parent['id'] in counts:
+                t = parent
         if t:
             e['inat_id'] = t['id']
             iconic_of.setdefault(t['id'], t.get('iconic_taxon_name'))
@@ -481,6 +497,10 @@ def main():
                 tc = taicol_info(taicol_by_name(f, ' '.join(t['name'].split()[:2])))
 
         zh = tc.get('zh') or (off['raw_names'][0] if off else None) or (t or {}).get('preferred_common_name')
+        if off and zh and off['raw_names'][0].replace('台', '臺') == zh.replace('台', '臺'):
+            zh = off['raw_names'][0]
+        elif zh and '台' in zh and zh.replace('台', '臺') in (off['raw_names'] if off else []):
+            zh = zh.replace('台', '臺')
         if not zh or not CJK.search(zh):
             continue
         sci = tc.get('sci') or (t['name'] if t else '')
@@ -533,7 +553,7 @@ def main():
                 tcred = oc['text_credit']
                 entry['credits']['text'] = {
                     'by': tcred.get('作者', ''), 'source': tcred.get('提供者', ''),
-                    'license': tcred.get('授權方式', '').replace('CC by by-nc', 'CC BY-NC'),
+                    'license': license_label(tcred.get('授權方式', '')),
                 }
 
         # 維基百科：先記下候選標題，稍後批次查詢
@@ -551,7 +571,7 @@ def main():
                 pc = oc.get('photo_credit', {})
                 entry['credits']['photo'] = {
                     'by': pc.get('拍攝者', ''), 'source': pc.get('提供者', ''),
-                    'license': pc.get('授權方式', '').replace('CC by by-nc', 'CC BY-NC'),
+                    'license': license_label(pc.get('授權方式', '')),
                     'url': off['pages'][0],
                 }
             elif t:
