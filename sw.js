@@ -1,5 +1,5 @@
 // 簡單的離線快取：優先使用網路，失敗時改用快取
-const CACHE = 'nature-journal-v2';
+const CACHE = 'nature-journal-v3';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'places.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
