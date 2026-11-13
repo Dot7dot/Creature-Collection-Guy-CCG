@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="coffee">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>自然手記</title>
+  <meta name="description" content="拍照記錄大自然：動物、植物、風景，附上地點與時間。">
+  <meta name="theme-color" content="#4A2E21">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c4 3 7 7 7 11a7 7 0 0 1-14 0c0-4 3-8 7-11zm0 5v13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h1>自然手記</h1>
+    </div>
+    <button id="themeBtn" class="theme-btn" type="button" aria-label="切換主題">
+      <span class="swatch"></span>
+      <span id="themeLabel">咖啡橘</span>
+    </button>
+  </header>
+
+  <main>
+    <!-- ===== 拍照頁 ===== -->
+    <section id="view-camera" class="view active" aria-label="拍照">
+      <div class="frame-wrap">
+        <div id="frame" class="frame">
+          <video id="video" playsinline muted autoplay></video>
+          <img id="preview" alt="拍攝的照片預覽" hidden>
+          <div id="frameIdle" class="frame-idle">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+            <button id="startCamBtn" class="btn btn-primary" type="button">開啟相機</button>
+            <label class="link-btn">
+              或從相簿選擇照片
+              <input id="fileInput" type="file" accept="image/*" hidden>
+            </label>
+          </div>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+        </div>
+      </div>
+
+      <div class="shutter-row" id="shutterRow" hidden>
+        <button id="switchCamBtn" class="icon-btn" type="button" aria-label="切換鏡頭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="shutterBtn" class="shutter" type="button" aria-label="拍照"><span></span></button>
+        <button id="closeCamBtn" class="icon-btn" type="button" aria-label="關閉相機">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <form id="recordForm" class="record-form" hidden>
+        <div class="field">
+          <span class="label">拍攝類別</span>
+          <div class="segmented" role="radiogroup" aria-label="拍攝類別">
+            <label><input type="radio" name="category" value="animal" checked><span>動物</span></label>
+            <label><input type="radio" name="category" value="plant"><span>植物</span></label>
+            <label><input type="radio" name="category" value="landscape"><span>風景</span></label>
+          </div>
+        </div>
+
+        <label class="field">
+          <span class="label">照片名稱</span>
+          <input id="nameInput" type="text" maxlength="60" placeholder="例如：台灣藍鵲" required>
+        </label>
+
+        <label class="field">
+          <span class="label">備註</span>
+          <textarea id="noteInput" rows="3" maxlength="1000" placeholder="寫下觀察到的細節…"></textarea>
+        </label>
+
+        <div class="meta-grid">
+          <div class="meta">
+            <span class="label">地點</span>
+            <div class="meta-value">
+              <span id="locText">尚未取得</span>
+              <button id="locBtn" class="link-btn small" type="button">重新定位</button>
+            </div>
+          </div>
+          <div class="meta">
+            <span class="label">時間</span>
+            <div class="meta-value"><span id="timeText">—</span></div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button id="retakeBtn" class="btn btn-ghost" type="button">重拍</button>
+          <button id="saveBtn" class="btn btn-primary" type="submit">儲存到相簿</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ===== 相簿頁 ===== -->
+    <section id="view-album" class="view" aria-label="相簿">
+      <div class="tabs" role="tablist">
+        <button class="tab active" role="tab" data-cat="animal" type="button">動物 <span class="count" data-count="animal">0</span></button>
+        <button class="tab" role="tab" data-cat="plant" type="button">植物 <span class="count" data-count="plant">0</span></button>
+        <button class="tab" role="tab" data-cat="landscape" type="button">風景 <span class="count" data-count="landscape">0</span></button>
+      </div>
+      <div id="grid" class="grid"></div>
+      <p id="emptyText" class="empty" hidden>這個分類還沒有照片，去拍一張吧！</p>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="camera" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      <span>拍照</span>
+    </button>
+    <button class="nav-btn" data-view="album" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="4" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="13" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      <span>相簿</span>
+    </button>
+  </nav>
+
+  <!-- ===== 照片詳情 ===== -->
+  <dialog id="detail" class="detail">
+    <div class="detail-inner">
+      <button id="detailClose" class="icon-btn detail-close" type="button" aria-label="關閉">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <img id="detailImg" alt="">
+      <div class="detail-body">
+        <span id="detailCat" class="chip"></span>
+        <h2 id="detailName"></h2>
+        <dl>
+          <dt>時間</dt><dd id="detailTime"></dd>
+          <dt>地點</dt><dd id="detailLoc"></dd>
+          <dt>備註</dt><dd id="detailNote"></dd>
+        </dl>
+        <div class="form-actions">
+          <a id="detailDownload" class="btn btn-ghost" download>下載照片</a>
+          <button id="detailDelete" class="btn btn-danger" type="button">刪除</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <canvas id="canvas" hidden></canvas>
+
+  <script src="app.js"></script>
+</body>
+</html>

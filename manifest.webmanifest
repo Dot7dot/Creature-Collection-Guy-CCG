@@ -1,0 +1,14 @@
+{
+  "name": "自然手記",
+  "short_name": "自然手記",
+  "description": "拍照記錄大自然：動物、植物、風景，附上地點與時間。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FBF3EA",
+  "theme_color": "#4A2E21",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
