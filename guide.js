@@ -163,7 +163,7 @@ const Guide = (() => {
     ];
 
     let html = `<h2 class="sp-title">${esc(sp.zh)}</h2>
-      <p class="sp-sci">${esc(sp.sci)}</p>
+      <p class="sp-sci">${esc(sp.sci)}${sp.synonyms ? `<span class="sp-syn">（亦作 ${esc(sp.synonyms.join('、'))}）</span>` : ''}</p>
       ${sp.alt.length ? `<p class="sp-alt">別名：${esc(sp.alt.join('、'))}</p>` : ''}
       <div class="sp-tags">${tags.join('')}</div>`;
 

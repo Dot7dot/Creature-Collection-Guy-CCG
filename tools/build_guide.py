@@ -606,6 +606,29 @@ def main():
                 break
     print(f'   有維基百科簡介：{sum(1 for e in out if "wiki" in e)} 種')
 
+    # 同名物種合併（例如官方與 iNaturalist 採用不同學名）：保留官方條目，併入觀察資料
+    by_zh = {}
+    for e in out:
+        by_zh.setdefault(e['zh'], []).append(e)
+    for zh_name, group in by_zh.items():
+        if len(group) < 2:
+            continue
+        keep = max(group, key=lambda e: (e['featured'], e['obs']))
+        for other in group:
+            if other is keep:
+                continue
+            if not keep['obs'] and other['obs']:
+                keep['obs'], keep['months'] = other['obs'], other['months']
+            for k, v in other['links'].items():
+                keep['links'].setdefault(k, v)
+            if 'wiki' not in keep and 'wiki' in other and not (keep.get('official') or {}).get('description'):
+                keep['wiki'] = other['wiki']
+                keep['credits']['wiki'] = other['credits']['wiki']
+            if other['sci'] != keep['sci'] and other['sci'] not in keep['alt']:
+                keep.setdefault('synonyms', []).append(other['sci'])
+            out.remove(other)
+            print(f'   合併同名物種：{zh_name}（{other["sci"]} → {keep["sci"]}）')
+
     order = {'animal': 0, 'insect': 1, 'plant': 2}
     out.sort(key=lambda e: (order[e['category']], not e['featured'], -e['obs'], e['zh']))
     meta = {

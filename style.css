@@ -427,3 +427,4 @@ input[type="text"]:focus, textarea:focus { border-color: var(--primary); }
 @media (min-width: 520px) {
   .guide-grid { grid-template-columns: repeat(3, 1fr); }
 }
+.sp-syn { font-size: .85em; }
