@@ -26,6 +26,10 @@
   <main>
     <!-- ===== 拍照頁 ===== -->
     <section id="view-camera" class="view active" aria-label="拍照">
+      <div id="prefill" class="prefill" hidden>
+        <span>正在記錄：<b id="prefillName"></b></span>
+        <button id="prefillClear" class="link-btn small" type="button">取消</button>
+      </div>
       <div class="frame-wrap">
         <div id="frame" class="frame">
           <video id="video" playsinline muted autoplay></video>
@@ -104,6 +108,27 @@
       <div id="grid" class="grid"></div>
       <p id="emptyText" class="empty" hidden>這個分類還沒有照片，去拍一張吧！</p>
     </section>
+    <!-- ===== 太平山生物圖鑑 ===== -->
+    <section id="view-guide" class="view" aria-label="太平山生物圖鑑">
+      <div class="guide-head">
+        <h2>太平山生物圖鑑</h2>
+        <p id="guideMeta" class="guide-meta">載入中…</p>
+      </div>
+      <div class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <input id="guideSearch" type="search" placeholder="搜尋名稱、學名、科名…" aria-label="搜尋物種">
+      </div>
+      <div class="tabs guide-tabs" role="tablist">
+        <button class="tab active" role="tab" data-gcat="animal" type="button">動物 <span class="count" data-gcount="animal">0</span></button>
+        <button class="tab" role="tab" data-gcat="insect" type="button">昆蟲 <span class="count" data-gcount="insect">0</span></button>
+        <button class="tab" role="tab" data-gcat="plant" type="button">植物 <span class="count" data-gcount="plant">0</span></button>
+      </div>
+      <div id="guideChips" class="chips" role="group" aria-label="篩選"></div>
+      <p id="guideResult" class="guide-result"></p>
+      <div id="guideGrid" class="grid guide-grid"></div>
+      <p id="guideEmpty" class="empty" hidden>找不到符合的物種</p>
+      <footer id="guideSources" class="guide-sources"></footer>
+    </section>
   </main>
 
   <nav class="bottom-nav">
@@ -114,6 +139,10 @@
     <button class="nav-btn" data-view="album" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="4" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="13" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
       <span>相簿</span>
+    </button>
+    <button class="nav-btn" data-view="guide" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5V19c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 6v13.5" stroke="currentColor" stroke-width="1.8"/></svg>
+      <span>圖鑑</span>
     </button>
   </nav>
 
@@ -174,11 +203,26 @@
     </div>
   </dialog>
 
+  <!-- ===== 物種詳情 ===== -->
+  <dialog id="species" class="detail">
+    <div class="detail-inner">
+      <button id="speciesClose" class="icon-btn detail-close" type="button" aria-label="關閉">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <figure class="sp-photo">
+        <img id="spImg" alt="">
+        <figcaption id="spPhotoCredit"></figcaption>
+      </figure>
+      <div class="detail-body" id="spBody"></div>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <canvas id="canvas" hidden></canvas>
 
   <script src="config.js"></script>
   <script src="places.js"></script>
   <script src="app.js"></script>
+  <script src="guide.js"></script>
 </body>
 </html>

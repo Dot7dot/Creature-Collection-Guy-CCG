@@ -120,10 +120,8 @@ function currentView() {
 function showView(name) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
-  if (name === 'album') {
-    stopCamera();
-    renderAlbum();
-  }
+  if (name !== 'camera') stopCamera();
+  if (name === 'album') renderAlbum();
   window.scrollTo(0, 0);
 }
 
@@ -216,11 +214,31 @@ function setCaptured(blob) {
   preview.hidden = false;
   frame.classList.add('shot');
   $('#timeText').textContent = formatTime(state.capturedAt);
+  applyPrefill();
   $('#recordForm').hidden = false;
   ensureLocation();
   renderLoc();
   setTimeout(() => $('#recordForm').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 }
+
+/* ---------- 從圖鑑帶入的物種 ---------- */
+let cameraPrefill = null;
+
+function setCameraPrefill(p) {
+  cameraPrefill = p;
+  $('#prefill').hidden = !p;
+  $('#prefillName').textContent = p ? p.name : '';
+  if (p && state.blob) applyPrefill();
+}
+
+function applyPrefill() {
+  if (!cameraPrefill) return;
+  if (!$('#nameInput').value.trim()) $('#nameInput').value = cameraPrefill.name;
+  const radio = $(`#recordForm input[name="category"][value="${cameraPrefill.category}"]`);
+  if (radio) radio.checked = true;
+}
+
+$('#prefillClear').addEventListener('click', () => setCameraPrefill(null));
 
 /** 清掉這次拍攝的照片與表單；定位結果保留，兩分鐘內重拍可直接沿用 */
 function resetCapture() {
@@ -440,6 +458,7 @@ $('#recordForm').addEventListener('submit', async (e) => {
     else if (record.location && record.location.placeStatus === 'retry') retryPending();
     toast(`已儲存到「${CATEGORIES[category]}」相簿`);
     resetCapture();
+    setCameraPrefill(null);
     currentCat = category;
     showView('album');
   } catch (err) {
